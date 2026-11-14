@@ -95,22 +95,35 @@ select{height:50px;border:1px solid var(--line);border-radius:14px;padding:0 14p
 .btn:disabled{opacity:.5;cursor:default}
 .ph{width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none}
 .fl small{display:block}.fl a{color:var(--pri);font-weight:600}
+.hd{background:var(--latebg);color:var(--err)}.wf{background:var(--soft);color:var(--softink)}
+.cal .wk{color:var(--mute)}
+nav button{flex:1;min-width:0}
+.brand .logo{width:72px;height:72px;border-radius:22px;background:#fff}
+.mn{display:flex;align-items:center;justify-content:space-between}
+.rg{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.rg div{text-align:center}.rg b{display:block;font-size:18px}.rg span{font-size:12px;color:var(--mute)}
+.qf{display:flex;gap:8px;align-items:center;flex:1 1 100%}.qf input{flex:1;min-width:0;height:44px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.main>.acts{flex:none}
+.cbox .cst{min-height:0;font-size:15px}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="cam" class="cam" hidden role="dialog" aria-modal="true" aria-labelledby="ctitle"><div class="cbox"><h2 id="ctitle">Verify to check in</h2><div class="vwrap"><video id="vid" autoplay playsinline muted></video><div class="oval"></div></div><div id="cst" class="cst" role="status" aria-live="polite"></div><button class="btn" id="cgo" data-act="snap" disabled>Capture photo &amp; confirm</button><button class="btn sec" data-act="ccancel">Cancel</button></div></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="dlg" class="cam" hidden role="alertdialog" aria-modal="true" aria-labelledby="dt"><div class="cbox"><h2 id="dt"></h2><div id="dm" class="cst"></div><button class="btn" id="dy"></button><button class="btn sec" id="dn"></button></div></div>
 <script src="config.js"></script>
 <script>
-const USERS={
+const SHIFT={start:'10:00',end:'18:00',grace:15},HALF_IN='11:00',MIN_OUT='17:00';
+const BASE={
   prashant:{name:'Prashant',pw:'Prashant@123',role:'emp'},
   jitendra:{name:'Jitendra',pw:'Jitendra@123',role:'emp'},
   tejashree:{name:'Tejashree',pw:'Tejashree@123',role:'emp'},
   dipak:{name:'Dipak',pw:'Dipak@123',role:'emp'},
   admin:{name:'Admin',pw:'Admin@123',role:'admin'}
 };
-const EMPS=Object.keys(USERS).filter(i=>USERS[i].role==='emp');
+let USERS={...BASE};
+const emps=()=>Object.keys(USERS).filter(i=>USERS[i].role==='emp'&&USERS[i].active!==false);
 const $=s=>document.querySelector(s);
 const pad=n=>String(n).padStart(2,'0');
 const key=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
@@ -118,12 +131,13 @@ const hm=d=>pad(d.getHours())+':'+pad(d.getMinutes());
 const mins=t=>{const [h,m]=t.split(':').map(Number);return h*60+m};
 const f12=t=>{if(!t)return '—';const [h,m]=t.split(':').map(Number);return pad(h%12||12)+':'+pad(m)+' '+(h<12?'AM':'PM')};
 const dur=(a,b)=>{const d=Math.max(0,mins(b)-mins(a));return Math.floor(d/60)+'h '+pad(d%60)+'m'};
-const SHIFT={start:'10:00',end:'18:00',grace:15};
 const lateAfter=()=>{const m=mins(SHIFT.start)+SHIFT.grace;return pad(Math.floor(m/60))+':'+pad(m%60)};
 const isLate=t=>mins(t)>mins(lateAfter());
-const getLoc=()=>new Promise((res,rej)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),rej,{enableHighAccuracy:true,timeout:15000,maximumAge:0}):rej(new Error('no geo')));
-const dist=(a,b)=>{const R=6371000,r=x=>x*Math.PI/180,p=r(b.lat-a.lat),q=r(b.lng-a.lng),h=Math.sin(p/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(q/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
-const ini=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2);
+const isWk=d=>d.getDay()===0||d.getDay()===6;
+const wd=(a,b)=>{let c=0;const d=new Date(a+'T00:00:00'),e=new Date(b+'T00:00:00');for(;d<=e;d.setDate(d.getDate()+1))if(!isWk(d))c++;return c};
+const statusOf=e=>{if(!e)return null;if(e.wfh)return 'W';if(mins(e.in)>mins(HALF_IN)||(e.out&&mins(e.out)<mins(MIN_OUT)))return 'H';return isLate(e.in)?'L':'P'};
+const SL={P:['ok','Present'],L:['lt','Late'],H:['hd','Half day'],W:['wf','WFH']};
+const ini=n=>String(n).split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fd=k=>new Date(k+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
@@ -133,122 +147,179 @@ const IC={
   user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   team:'<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5M17 5a3.5 3.5 0 0 1 0 6.5M19 14.7c2 .7 3 2.2 3 5.3"/>',
   leave:'<path d="M4 7h16v12H4zM9 7V4h6v3"/>',
+  rep:'<path d="M5 20V10M12 20V4M19 20v-7"/>',
+  staff:'<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6M19 8v6M16 11h6"/>',
   pin:'<path d="M12 21s7-6.2 7-11a7 7 0 0 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
-  check:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
   lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff:'<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6A17 17 0 0 0 2 12s4 7 10 7a9.8 9.8 0 0 0 4.4-1"/>'
 };
 const ic=(n,s=22)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
+const LOGO='<svg viewBox="0 0 96 96" width="48" height="48" role="img" aria-label="Mark Me"><path d="M48 14c-13.3 0-24 10.4-24 23.4C24 55 48 82 48 82s24-27 24-44.6C72 24.4 61.3 14 48 14z" fill="#4338CA"/><circle cx="48" cy="37.5" r="12.5" fill="#fff"/><path d="M42 37.8l4.6 4.6L55 33" fill="none" stroke="#0F766E" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 const DB=(window.HAZRI_DB||'').replace(/\/+$/,'');
 const rt=(p,m='GET',b)=>fetch(DB+'/'+p+'.json',{method:m,headers:b!==undefined?{'Content-Type':'application/json'}:{},body:b!==undefined?JSON.stringify(b):undefined,signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
 const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(b=>b.toString(16).padStart(2,'0')).join('');
-let db={logs:{},leaves:[],office:null};EMPS.forEach(i=>db.logs[i]={});
+let db={logs:{},leaves:[],office:null};
+const LG=i=>db.logs[i]||{};
 const pc={};let lastSync=0,lastJson='';
-const idle=()=>$('#cam').hidden&&!/^(INPUT|SELECT)$/.test(document.activeElement.tagName);
+const UK='hazri_user2';
+let user=null,tab='home',th=store.get('hazri_theme')||'auto',rm=(()=>{const d=new Date();return{y:d.getFullYear(),m:d.getMonth()}})();
+try{const s=JSON.parse(store.get(UK));if(s&&s.id)user=s}catch(e){}
+const applyTheme=()=>{const r=document.documentElement;th==='auto'?r.removeAttribute('data-theme'):r.setAttribute('data-theme',th)};
+applyTheme();
+const idle=()=>$('#cam').hidden&&$('#dlg').hidden&&!/^(INPUT|SELECT)$/.test(document.activeElement.tagName);
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600)}
+const guard=async(f,m)=>{try{await f()}catch(e){toast(m||'No internet. Please try again.')}};
+function ask(t,m,y,n){return new Promise(res=>{$('#dt').textContent=t;$('#dm').textContent=m;$('#dy').textContent=y;$('#dn').textContent=n;const d=$('#dlg');d.hidden=false;const done=v=>{d.hidden=true;$('#dy').onclick=$('#dn').onclick=null;res(v)};$('#dy').onclick=()=>done(true);$('#dn').onclick=()=>done(false)})}
 async function sync(force){
   if(!DB)return;
   try{
-    const [lg,lv,of]=await Promise.all([rt('logs'),rt('leaves'),rt('office')]);
+    const [lg,lv,of,us]=await Promise.all([rt('logs'),rt('leaves'),rt('office'),rt('users')]);
+    USERS={...BASE};
+    for(const i in (us||{})){const b=BASE[i],u=us[i];if(b)USERS[i]={...b,...u,role:b.role};else if(u&&u.name)USERS[i]={...u,role:'emp'}}
     const nd={logs:lg||{},leaves:Object.values(lv||{}).sort((a,b)=>a.ts-b.ts),office:of||null};
-    EMPS.forEach(i=>{nd.logs[i]=nd.logs[i]||{}});
-    const s=JSON.stringify(nd);lastSync=Date.now();
+    emps().forEach(i=>{nd.logs[i]=nd.logs[i]||{}});
+    const s=JSON.stringify([nd,us]);lastSync=Date.now();
+    if(user&&USERS[user.id]&&USERS[user.id].active===false){user=null;store.set(UK,'');render();return}
     if(s!==lastJson||force){lastJson=s;db=nd;if(user&&idle())render()}
   }catch(e){}
 }
 async function loadPhotos(){
   if(!user||user.role!=='admin'||tab!=='team')return;
   const k=key(new Date());let got=false;
-  await Promise.all(EMPS.filter(i=>db.logs[i][k]&&db.logs[i][k].ph&&!pc[i+k]).map(async i=>{try{const p=await rt(`photos/${i}/${k}/in`);if(p){pc[i+k]=p;got=true}}catch(e){}}));
+  await Promise.all(emps().filter(i=>LG(i)[k]&&LG(i)[k].ph&&!pc[i+k]).map(async i=>{try{const p=await rt(`photos/${i}/${k}/in`);if(p){pc[i+k]=p;got=true}}catch(e){}}));
   if(got&&idle())render();
 }
-const guard=async(f,m)=>{try{await f()}catch(e){toast(m||'No internet. Please try again.')}};
-let th=store.get('hazri_theme')||'auto';
-const applyTheme=()=>{const r=document.documentElement;th==='auto'?r.removeAttribute('data-theme'):r.setAttribute('data-theme',th)};
-applyTheme();
-let user=null,tab='home';
-const sid=store.get('hazri_user');
-if(sid&&USERS[sid])user={id:sid,...USERS[sid]};
+const getLoc=()=>new Promise((res,rej)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),rej,{enableHighAccuracy:true,timeout:15000,maximumAge:0}):rej(new Error('no geo')));
+const dist=(a,b)=>{const R=6371000,r=x=>x*Math.PI/180,p=r(b.lat-a.lat),q=r(b.lng-a.lng),h=Math.sin(p/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(q/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 
-function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2200)}
-const pill=t=>t?(isLate(t)?'<span class="pill lt">Late</span>':'<span class="pill ok">Present</span>'):'<span class="pill gray">Not in</span>';
+const pill=e=>{const s=statusOf(e);return s?`<span class="pill ${SL[s][0]}">${SL[s][1]}</span>`:'<span class="pill gray">Not in</span>'};
 const stat=(v,l)=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`;
 const today=()=>new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'});
+const nd=l=>wd(l.from,l.to);
 function row(dk,e){
   const d=new Date(dk+'T00:00:00');
-  return `<div class="row"><div class="dt"><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-IN',{weekday:'short'})}</span></div><div class="fl"><b>${f12(e.in)} – ${f12(e.out)}</b><small>${e.out?dur(e.in,e.out):'Still working'}</small></div>${pill(e.in)}</div>`;
+  return `<div class="row"><div class="dt"><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-IN',{weekday:'short'})}</span></div><div class="fl"><b>${f12(e.in)} – ${f12(e.out)}</b><small>${e.out?dur(e.in,e.out):'Still working'}</small></div>${pill(e)}</div>`;
 }
 function lvDays(id){
   const s=new Set();
   db.leaves.filter(l=>l.id===id&&l.status==='Approved').forEach(l=>{const d=new Date(l.from+'T00:00:00'),e=new Date(l.to+'T00:00:00');for(;d<=e;d.setDate(d.getDate()+1))s.add(key(d))});
   return s;
 }
-function cal(id){
-  const L=db.logs[id],n=new Date(),y=n.getFullYear(),m=n.getMonth(),first=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate(),lv=lvDays(id);
-  let c='';for(let i=0;i<first;i++)c+='<i></i>';
-  for(let d=1;d<=days;d++){const k=y+'-'+pad(m+1)+'-'+pad(d),e=L[k];let cl='';
-    if(e)cl=isLate(e.in)?'lt':'ok';else if(lv.has(k))cl='lv';
-    c+=`<span class="${cl}${d===n.getDate()?' td':''}">${d}</span>`}
-  return `<div class="card"><b>${n.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</b><div class="cal">${'SMTWTFS'.split('').map(x=>`<em>${x}</em>`).join('')}${c}</div><div class="lg"><span class="pill ok">Present</span><span class="pill lt">Late</span><span class="pill lv">Leave</span></div></div>`;
+function lvStat(id,y){
+  const q=(USERS[id]||{}).quota,mine=db.leaves.filter(l=>l.id===id&&l.from.slice(0,4)===String(y));
+  const t=mine.filter(l=>l.status==='Approved').reduce((s,l)=>s+nd(l),0),p=mine.filter(l=>l.status==='Pending').reduce((s,l)=>s+nd(l),0);
+  return {q:q==null?null:q,t,p,b:q==null?null:q-t};
 }
-const nd=l=>Math.round((new Date(l.to)-new Date(l.from))/864e5)+1;
-const lrow=(l,adm)=>`<div class="row lr"><div class="fl"><b>${adm?USERS[l.id].name+' · ':''}${esc(l.type)}</b><small>${fd(l.from)}${l.to!==l.from?' – '+fd(l.to):''} · ${nd(l)} day${nd(l)>1?'s':''} · ${esc(l.reason)}</small></div><span class="pill ${l.status==='Approved'?'ok':l.status==='Rejected'?'rj':'gray'}">${l.status}</span>${l.status==='Pending'?`<div class="acts">${adm?`<button class="mini" data-act="appr" data-v="${l.ts}">Approve</button><button class="mini sec" data-act="rej" data-v="${l.ts}">Reject</button>`:`<button class="mini sec" data-act="cancel" data-v="${l.ts}">Cancel request</button>`}</div>`:''}</div>`;
+function cal(id){
+  const L=LG(id),n=new Date(),y=n.getFullYear(),m=n.getMonth(),first=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate(),lv=lvDays(id);
+  let c='';for(let i=0;i<first;i++)c+='<i></i>';
+  for(let d=1;d<=days;d++){const dt=new Date(y,m,d),k=key(dt),s=statusOf(L[k]);
+    const cl=s?{P:'ok',L:'lt',H:'hd',W:'wf'}[s]:isWk(dt)?'wk':lv.has(k)?'lv':'';
+    c+=`<span class="${cl}${d===n.getDate()?' td':''}">${d}</span>`}
+  return `<div class="card"><b>${n.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</b><div class="cal">${'SMTWTFS'.split('').map(x=>`<em>${x}</em>`).join('')}${c}</div><div class="lg"><span class="pill ok">Present</span><span class="pill lt">Late</span><span class="pill hd">Half day</span><span class="pill lv">Leave</span><span class="pill wf">WFH</span></div></div>`;
+}
+const lrow=(l,adm,ro)=>`<div class="row lr"><div class="fl"><b>${adm?esc((USERS[l.id]||{name:l.id}).name)+' · ':''}${esc(l.type)}</b><small>${fd(l.from)}${l.to!==l.from?' – '+fd(l.to):''} · ${nd(l)} working day${nd(l)===1?'':'s'} · ${esc(l.reason)}</small></div><span class="pill ${l.status==='Approved'?'ok':l.status==='Rejected'?'rj':'gray'}">${l.status}</span>${l.status==='Pending'&&!ro?`<div class="acts">${adm?`<button class="mini" data-act="appr" data-v="${l.ts}">Approve</button><button class="mini sec" data-act="rej" data-v="${l.ts}">Reject</button>`:`<button class="mini sec" data-act="cancel" data-v="${l.ts}">Cancel request</button>`}</div>`:''}</div>`;
 
 function login(err){
-  return `<main class="main login"><div class="brand"><div class="logo">${ic('check',30)}</div><h1>Mark Me</h1><p>Smart attendance for your team</p></div>
+  return `<main class="main login"><div class="brand"><div class="logo">${LOGO}</div><h1>Mark Me</h1><p>Smart attendance for your team</p></div>
   <form class="lform" data-f="login" autocomplete="on"><h2>Welcome back</h2><div class="sub">Sign in to mark your attendance</div>
   <label for="id">User ID</label><div class="fld">${ic('user',20)}<input id="id" autocomplete="username" autocapitalize="none" placeholder="Enter your ID" required></div>
   <label for="pw">Password</label><div class="fld">${ic('lock',20)}<input id="pw" type="password" autocomplete="current-password" placeholder="Enter password" required><button type="button" class="eye" data-act="eye" aria-label="Show password">${ic('eye',20)}</button></div>
   <div class="err" role="alert">${err||''}</div><button class="btn">Sign in</button></form>
   <div class="note">Need access? Contact your administrator.</div></main>`;
 }
-
 function home(){
-  const L=db.logs[user.id],n=new Date(),k=key(n),e=L[k],ks=Object.keys(L).sort().reverse(),h=n.getHours();
-  const lt=ks.filter(x=>isLate(L[x].in)).length,fin=ks.filter(x=>L[x].out);
-  const avg=fin.length?(fin.reduce((s,x)=>s+mins(L[x].out)-mins(L[x].in),0)/fin.length/60).toFixed(1)+'h':'—';
+  const L=LG(user.id),n=new Date(),k=key(n),e=L[k],ks=Object.keys(L).sort().reverse(),h=n.getHours(),wk=isWk(n);
+  const cnt=c=>ks.filter(x=>statusOf(L[x])===c).length;
   let st,btn;
-  if(!e){st='Not checked in yet';btn='<button class="hbtn" data-act="in">Check in</button>'}
-  else if(!e.out){st='Checked in at '+f12(e.in)+(isLate(e.in)?' · Late by '+(mins(e.in)-mins(SHIFT.start))+' min':'')+'<br>Working: <b id="wk" data-in="'+e.in+'">'+dur(e.in,hm(n))+'</b><br>Photo and location recorded';btn='<button class="hbtn" data-act="out">Check out</button>'}
-  else{st='Day complete · '+dur(e.in,e.out);btn='<button class="hbtn" disabled>Done for today</button>'}
-  return `<div class="top"><div><div class="sub">${today()}</div><h1>${h<12?'Good morning':h<17?'Good afternoon':'Good evening'}, ${user.name}</h1></div><div class="av">${ini(user.name)}</div></div>
+  if(!e){st=wk?'Today is a week off':'Not checked in yet';btn='<button class="hbtn" data-act="in">Check in</button>'}
+  else if(!e.out){const s=statusOf(e);st='Checked in at '+f12(e.in)+(s==='L'?' · Late by '+(mins(e.in)-mins(SHIFT.start))+' min':s==='H'?' · Half day':s==='W'?' · Work from home':'')+'<br>Working: <b id="wk" data-in="'+e.in+'">'+dur(e.in,hm(n))+'</b><br>Photo and location recorded';btn='<button class="hbtn" data-act="out">Check out</button>'}
+  else{const s=statusOf(e);st='Day complete · '+dur(e.in,e.out)+(s==='H'?' · Half day':s==='W'?' · WFH':'');btn='<button class="hbtn" disabled>Done for today</button>'}
+  return `<div class="top"><div><div class="sub">${today()}</div><h1>${h<12?'Good morning':h<17?'Good afternoon':'Good evening'}, ${esc(user.name)}</h1></div><div class="av">${ini(user.name)}</div></div>
   <div class="hero"><div class="r"><span>Today’s shift</span><span class="chip">${f12(SHIFT.start)} – ${f12(SHIFT.end)}</span></div>
   <div class="clk" id="clk">${f12(hm(n))}</div>
-  <div class="loc">${ic('pin',18)}${db.office?'Geofence on · '+db.office.r+' m':'Geofence not set'} · late after ${f12(lateAfter())}</div>
+  <div class="loc">${ic('pin',18)}${wk?'Week off (Sat &amp; Sun)':(db.office?'Geofence on · '+db.office.r+' m':'Geofence not set')+' · late after '+f12(lateAfter())}</div>
   <div role="status" style="font-size:15px;font-weight:600;line-height:1.5">${st}</div>${btn}</div>
-  <div class="stats">${stat(ks.length,'Present days')}${stat(lt,'Late days')}${stat(avg,'Avg. hours')}</div>
+  <div class="stats">${stat(cnt('P')+cnt('L'),'Present')}${stat(cnt('L'),'Late')}${stat(cnt('H'),'Half days')}</div>
   <h2>Recent days</h2>${ks.length?ks.slice(0,3).map(x=>row(x,L[x])).join(''):'<div class="note">No attendance yet. Tap Check in to start.</div>'}`;
 }
 function hist(){
-  const L=db.logs[user.id],ks=Object.keys(L).sort().reverse(),n=ks.length,lt=ks.filter(x=>isLate(L[x].in)).length;
-  return `<h1>History</h1>${cal(user.id)}<div class="card"><div class="big">${n}<span> days recorded</span></div><div class="bar"><i style="width:${n?Math.round((n-lt)/n*100):0}%"></i></div><small>${n-lt} on time · ${lt} late</small></div>${ks.length?ks.map(x=>row(x,L[x])).join(''):'<div class="note">No records yet.</div>'}`;
+  const L=LG(user.id),ks=Object.keys(L).sort().reverse(),n=ks.length,ot=ks.filter(x=>statusOf(L[x])==='P').length;
+  return `<h1>History</h1>${cal(user.id)}<div class="card"><div class="big">${n}<span> days recorded</span></div><div class="bar"><i style="width:${n?Math.round(ot/n*100):0}%"></i></div><small>${ot} on time · ${n-ot} late, half day or WFH</small></div>${ks.length?ks.map(x=>row(x,L[x])).join(''):'<div class="note">No records yet.</div>'}`;
 }
 function leave(){
-  const mine=db.leaves.filter(l=>l.id===user.id),my=mine.slice().reverse(),t=key(new Date());
-  const taken=mine.filter(l=>l.status==='Approved').reduce((s,l)=>s+nd(l),0),pend=mine.filter(l=>l.status==='Pending').length;
-  return `<h1>Leave</h1><div class="stats">${stat(taken,'Days taken')}${stat(pend,'Pending')}${stat(mine.length,'Requests')}</div>
+  const mine=db.leaves.filter(l=>l.id===user.id),my=mine.slice().reverse(),t=key(new Date()),s=lvStat(user.id,new Date().getFullYear());
+  return `<h1>Leave</h1><div class="stats">${stat(s.q==null?'—':s.q,'Yearly quota')}${stat(s.t,'Taken')}${stat(s.b==null?'—':s.b,'Balance')}</div>
   <form class="card" data-f="leave"><label for="lt">Type</label><select id="lt"><option>Casual leave</option><option>Sick leave</option><option>Other</option></select>
   <label for="lf">From</label><input id="lf" type="date" min="${t}" value="${t}" required><label for="lo">To</label><input id="lo" type="date" min="${t}" value="${t}" required>
-  <label for="lr">Reason</label><input id="lr" placeholder="Short reason" required><div class="err" role="alert" id="le"></div><button class="btn">Request leave</button></form>
+  <label for="lr">Reason</label><input id="lr" placeholder="Short reason" required><div class="err" role="alert" id="le"></div><button class="btn">Request leave</button><small>Saturday and Sunday are not counted.${s.q==null?' Your yearly quota has not been set by the admin yet.':''}</small></form>
   <h2>My requests</h2>${my.length?my.map(l=>lrow(l)).join(''):'<div class="note">No requests yet. Use the form above to apply.</div>'}`;
 }
 function team(){
-  const k=key(new Date()),n=EMPS.filter(i=>db.logs[i][k]).length,pend=db.leaves.filter(l=>l.status==='Pending').length;
+  const n=new Date(),k=key(n),wk=isWk(n),list=emps(),got=list.filter(i=>LG(i)[k]).length,pend=db.leaves.filter(l=>l.status==='Pending').length;
   return `<div><div class="sub">${today()}</div><h1>Team today</h1></div>
-  <div class="stats">${stat(n,'Checked in')}${stat(EMPS.length-n,'Not yet')}${stat(pend,'Pending')}</div>
+  <div class="stats">${stat(got,wk?'Working (WFH)':'Checked in')}${stat(wk?'Off':list.length-got,wk?'Week off':'Not yet')}${stat(pend,'Pending')}</div>
   ${db.office?'':'<div class="card"><b>Geofence is off</b><small>Open Profile and tap “Set to my current location” while you are at the office.</small></div>'}
-  ${EMPS.map(i=>{const e=db.logs[i][k],nm=USERS[i].name,av=pc[i+k]?`<img class="ph" src="${pc[i+k]}" alt="${nm} check-in photo">`:`<div class="av">${ini(nm)}</div>`;
-  return `<div class="row">${av}<div class="fl"><b>${nm}</b><small>${e?f12(e.in)+(e.out?' – '+f12(e.out):' · working'):'No check-in yet'}</small>${e&&e.loc?`<small><a href="https://maps.google.com/?q=${e.loc.lat},${e.loc.lng}" target="_blank" rel="noopener">View location</a>${db.office?' · '+Math.round(dist(e.loc,db.office))+' m from office':''}</small>`:''}</div>${pill(e&&e.in)}</div>`}).join('')}
+  ${list.map(i=>{const e=LG(i)[k],nm=USERS[i].name,av=pc[i+k]?`<img class="ph" src="${pc[i+k]}" alt="${esc(nm)} check-in photo">`:`<div class="av">${ini(nm)}</div>`;
+  return `<div class="row">${av}<div class="fl"><b>${esc(nm)}</b><small>${e?f12(e.in)+(e.out?' – '+f12(e.out):' · working'):wk?'Week off':'No check-in yet'}</small>${e&&e.loc?`<small><a href="https://maps.google.com/?q=${e.loc.lat},${e.loc.lng}" target="_blank" rel="noopener">View location</a>${db.office&&!e.wfh?' · '+Math.round(dist(e.loc,db.office))+' m from office':''}</small>`:''}</div>${pill(e)}</div>`}).join('')}
   <div class="note">${lastSync?'Live · synced '+f12(hm(new Date(lastSync))):'Connecting to server…'}</div>`;
 }
 function leavesA(){
   const a=db.leaves.slice().reverse();
   return `<h1>Leave requests</h1>${a.length?a.map(l=>lrow(l,1)).join(''):'<div class="note">No leave requests yet. New requests from employees appear here.</div>'}`;
 }
+function repData(){
+  const {y,m}=rm,today=key(new Date()),last=new Date(y,m+1,0).getDate(),rows=[],detail=[];
+  emps().forEach(id=>{
+    const L=LG(id),lv=lvDays(id),r={id,name:USERS[id].name,P:0,L:0,H:0,W:0,LV:0,A:0,hrs:0};
+    for(let d=1;d<=last;d++){
+      const dt=new Date(y,m,d),k=key(dt);if(k>today)break;
+      const e=L[k],wk=isWk(dt),s=statusOf(e);let label='';
+      if(e){r[s]++;label=SL[s][1];if(e.out)r.hrs+=mins(e.out)-mins(e.in)}
+      else if(wk)label='Week off';
+      else if(lv.has(k)){r.LV++;label='Leave'}
+      else if(k<today){r.A++;label='Absent'}
+      if(label)detail.push([k,id,r.name,dt.toLocaleDateString('en-IN',{weekday:'short'}),e?e.in:'',e&&e.out?e.out:'',e&&e.out?dur(e.in,e.out):'',label,e&&e.loc?`https://maps.google.com/?q=${e.loc.lat},${e.loc.lng}`:'',e&&e.locOut?`https://maps.google.com/?q=${e.locOut.lat},${e.locOut.lng}`:'']);
+    }
+    rows.push(r);
+  });
+  return {rows,detail};
+}
+const mTitle=()=>new Date(rm.y,rm.m,1).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+const mKey=()=>rm.y+'-'+pad(rm.m+1);
+const mReq=()=>db.leaves.filter(l=>l.from.slice(0,7)===mKey());
+function rep(){
+  const {rows}=repData(),req=mReq();
+  return `<h1>Reports</h1>
+  <div class="card"><div class="mn"><button class="mini sec" data-act="rprev" aria-label="Previous month">‹</button><b>${mTitle()}</b><button class="mini sec" data-act="rnext" aria-label="Next month">›</button></div></div>
+  <h2>Attendance</h2>
+  ${rows.length?rows.map(r=>`<div class="card"><b>${esc(r.name)}</b><div class="rg">${[['Present',r.P],['Late',r.L],['Half day',r.H],['Leave',r.LV],['Absent',r.A],['WFH',r.W],['Hours',Math.floor(r.hrs/60)+'h']].map(([l,v])=>`<div><b>${v}</b><span>${l}</span></div>`).join('')}</div></div>`).join(''):'<div class="note">No employees yet.</div>'}
+  <div class="acts"><button class="mini" data-act="xsum">Summary CSV</button><button class="mini sec" data-act="xdet">Daily log CSV</button></div>
+  <h2>Leave balance (${rm.y})</h2>
+  ${emps().map(id=>{const s=lvStat(id,rm.y);return `<div class="row"><div class="fl"><b>${esc(USERS[id].name)}</b><small>Quota ${s.q==null?'not set':s.q} · Taken ${s.t} · Pending ${s.p}</small></div><span class="pill ${s.b!=null&&s.b<0?'rj':'ok'}">${s.b==null?'—':s.b+' left'}</span></div>`}).join('')}
+  <h2>Leave requests in ${mTitle()}</h2>${req.length?req.map(l=>lrow(l,1,1)).join(''):'<div class="note">No leave requests this month.</div>'}
+  <button class="btn sec" data-act="xlv">Export leave report (CSV)</button>
+  <div class="note">Leave days exclude Saturday and Sunday. Public holidays are not tracked, so they show as absent.</div>`;
+}
+function staff(){
+  const act=emps(),ina=Object.keys(USERS).filter(i=>USERS[i].role==='emp'&&USERS[i].active===false);
+  return `<h1>Staff</h1>
+  <form class="card" data-f="addemp"><b>Add employee</b><label for="en">Full name</label><input id="en" autocomplete="off" required>
+  <label for="ei">User ID (3-20 letters or numbers)</label><input id="ei" autocapitalize="none" autocomplete="off" required>
+  <label for="ep">Password (min. 6 characters)</label><input id="ep" autocomplete="off" required>
+  <label for="eq">Yearly leave days</label><input id="eq" type="number" min="0" max="366" placeholder="e.g. 12" required>
+  <div class="err" role="alert" id="ee"></div><button class="btn">Add employee</button></form>
+  <h2>Employees (${act.length})</h2>
+  ${act.map(i=>`<div class="row lr"><div class="av">${ini(USERS[i].name)}</div><div class="fl"><b>${esc(USERS[i].name)}</b><small>${i}</small></div>
+  <div class="qf"><label class="sr" for="q-${i}">Yearly leave days for ${esc(USERS[i].name)}</label><input id="q-${i}" type="number" min="0" max="366" value="${USERS[i].quota==null?'':USERS[i].quota}" placeholder="Leave days / year"><button class="mini" data-act="saveq" data-v="${i}">Save</button></div>
+  <div class="acts"><button class="mini sec" data-act="deact" data-v="${i}">Deactivate</button></div></div>`).join('')}
+  ${ina.length?'<h2>Inactive</h2>'+ina.map(i=>`<div class="row"><div class="fl"><b>${esc(USERS[i].name)}</b><small>${i}</small></div><button class="mini" data-act="react" data-v="${i}">Reactivate</button></div>`).join(''):''}`;
+}
 function me(){
   const adm=user.role==='admin',o=db.office;
-  return `<h1>Profile</h1><div class="card pf"><div class="av lg">${ini(user.name)}</div><b>${user.name}</b><small>${user.id} · ${adm?'Administrator':'Employee'}</small></div>
+  return `<h1>Profile</h1><div class="card pf"><div class="av lg">${ini(user.name)}</div><b>${esc(user.name)}</b><small>${user.id} · ${adm?'Administrator':'Employee'}</small></div>
   ${adm?`<div class="card"><b>Office location</b><small>${o?o.lat.toFixed(5)+', '+o.lng.toFixed(5)+' · allowed radius '+o.r+' m':'Not set. Check-ins are location-tagged but not restricted.'}</small><label for="rad">Allowed radius</label><select id="rad">${[100,200,300,500].map(r=>`<option value="${r}"${(o?o.r:200)===r?' selected':''}>${r} m</option>`).join('')}</select><button class="btn" data-act="setoffice">Set to my current location</button>${o?'<button class="btn sec" data-act="clroffice">Clear office location</button>':''}</div>`:''}
   <div class="card"><b>Appearance</b><div class="seg">${['auto','light','dark'].map(t=>`<button data-act="theme" data-v="${t}" class="${th===t?'on':''}">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div></div>
   <form class="card" data-f="pw"><b>Change password</b><label for="op">Current password</label><input id="op" type="password" autocomplete="current-password" required>
@@ -258,30 +329,41 @@ function me(){
 function render(err){
   const A=$('#app');
   if(!user){A.innerHTML=login(err);return}
-  const tabs=user.role==='admin'?[['team','Team','team'],['lv','Leaves','leave'],['me','Profile','user']]:[['home','Home','home'],['hist','History','hist'],['leave','Leave','leave'],['me','Profile','user']];
+  const tabs=user.role==='admin'?[['team','Team','team'],['lv','Leaves','leave'],['rep','Reports','rep'],['staff','Staff','staff'],['me','Profile','user']]:[['home','Home','home'],['hist','History','hist'],['leave','Leave','leave'],['me','Profile','user']];
   if(!tabs.some(t=>t[0]===tab))tab=tabs[0][0];
-  const body={home,hist,team,lv:leavesA,leave,me}[tab]();
+  const body={home,hist,team,lv:leavesA,rep,staff,leave,me}[tab]();
   A.innerHTML=`<main class="main">${body}</main><nav aria-label="Main">${tabs.map(([k,l,i])=>`<button data-act="tab" data-v="${k}" class="${tab===k?'on':''}"><span>${ic(i)}</span>${l}</button>`).join('')}</nav>`;
   if(tab==='team')loadPhotos();
 }
 
 let cs=null;
 function closeCam(){if(cs&&cs.stream)cs.stream.getTracks().forEach(t=>t.stop());cs=null;$('#cam').hidden=true;$('#vid').srcObject=null}
-function openCam(mode){
-  const st=$('#cst'),go=$('#cgo'),my=cs={mode,stream:null,loc:null,errs:[]};
+function openCam(mode,wfh){
+  const st=$('#cst'),go=$('#cgo'),my=cs={mode,wfh,stream:null,loc:null,errs:[]};
   $('#cam').hidden=false;go.disabled=true;
-  $('#ctitle').textContent=mode==='in'?'Verify to check in':'Verify to check out';
+  $('#ctitle').textContent=(mode==='in'?'Verify to check in':'Verify to check out')+(wfh?' (WFH)':'');
   st.textContent='Starting camera and location…';
   const ready=()=>{if(cs===my&&my.stream&&my.loc){go.disabled=false;st.textContent='Ready · GPS accuracy ±'+Math.round(my.loc.acc)+' m. Keep your face inside the oval.'}};
   const fail=m=>{if(cs!==my)return;my.errs.push(m);st.textContent=my.errs.join(' ')};
   (navigator.mediaDevices?navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false}):Promise.reject()).then(s=>{if(cs!==my){s.getTracks().forEach(t=>t.stop());return}my.stream=s;$('#vid').srcObject=s;ready()}).catch(()=>fail('Camera access is required. Allow camera permission and try again.'));
   getLoc().then(l=>{if(cs===my){my.loc=l;ready()}}).catch(()=>fail('Location is required. Turn on GPS and allow location permission.'));
 }
+async function punch(a){
+  const n=new Date(),e=LG(user.id)[key(n)];let wfh=false;
+  if(a==='in'){
+    if(isWk(n)){if(!await ask('Today is a week off','Are you working from home today?','Yes, work from home','No'))return;wfh=true}
+    else if(mins(hm(n))>mins(HALF_IN)&&!await ask('Half day','Checking in after '+f12(HALF_IN)+' is counted as a half day. Continue?','Continue','Cancel'))return;
+  }else{
+    wfh=!!(e&&e.wfh);
+    if(!wfh&&mins(hm(n))<mins(MIN_OUT)&&!await ask('Half day','Checking out before '+f12(MIN_OUT)+' is counted as a half day. Continue?','Continue','Cancel'))return;
+  }
+  openCam(a,wfh);
+}
 async function snap(){
   if(!cs||!cs.stream||!cs.loc)return;
   const v=$('#vid'),go=$('#cgo'),st=$('#cst'),c=document.createElement('canvas'),w=240,h=Math.round(w*(v.videoHeight||4)/(v.videoWidth||3));
   c.width=w;c.height=h;c.getContext('2d').drawImage(v,0,0,w,h);
-  const photo=c.toDataURL('image/jpeg',0.55),loc=cs.loc,mode=cs.mode,off=db.office;
+  const photo=c.toDataURL('image/jpeg',0.55),loc=cs.loc,mode=cs.mode,wfh=cs.wfh,off=wfh?null:db.office;
   if(off){const d=dist(loc,off);if(d>off.r){st.textContent='You are about '+Math.round(d)+' m from the office (allowed '+off.r+' m). Cancel, move closer and try again.';return}}
   go.disabled=true;st.textContent='Saving…';
   const id=user.id,k=key(new Date()),t=hm(new Date());
@@ -289,49 +371,81 @@ async function snap(){
     const cur=await rt(`logs/${id}/${k}`);
     if(mode==='in'&&cur){st.textContent='You are already checked in today (maybe from another device). Cancel to close.';return}
     if(mode==='out'&&(!cur||cur.out)){st.textContent=cur?'You have already checked out today. Cancel to close.':'No check-in found for today. Cancel to close.';return}
-    if(mode==='in'){await rt(`logs/${id}/${k}`,'PUT',{in:t,loc,ph:1});await rt(`photos/${id}/${k}/in`,'PUT',photo)}
+    if(mode==='in'){await rt(`logs/${id}/${k}`,'PUT',wfh?{in:t,loc,ph:1,wfh:1}:{in:t,loc,ph:1});await rt(`photos/${id}/${k}/in`,'PUT',photo)}
     else{await rt(`logs/${id}/${k}`,'PATCH',{out:t,locOut:loc,pho:1});await rt(`photos/${id}/${k}/out`,'PUT',photo)}
     closeCam();await sync(true);toast((mode==='in'?'Checked in at ':'Checked out at ')+f12(t));
   }catch(e){go.disabled=false;st.textContent='Could not save. Check your internet and try again.'}
 }
-document.addEventListener('click',e=>{
+const csv=rows=>'\ufeff'+rows.map(r=>r.map(c=>'"'+String(c==null?'':c).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+function dl(name,text){
+  if(window.Android&&window.Android.save){window.Android.save(name,text);return}
+  const b=new Blob([text],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);toast('Report downloaded');
+}
+function exportRep(kind){
+  if(kind==='xsum'){const {rows}=repData();dl(`MarkMe_summary_${mKey()}.csv`,csv([['Employee ID','Name','Present','Late','Half day','Leave','Absent','WFH','Hours']].concat(rows.map(r=>[r.id,r.name,r.P,r.L,r.H,r.LV,r.A,r.W,(r.hrs/60).toFixed(1)]))))}
+  else if(kind==='xdet'){const {detail}=repData();dl(`MarkMe_daily_${mKey()}.csv`,csv([['Date','Employee ID','Name','Day','In','Out','Hours','Status','In location','Out location']].concat(detail)))}
+  else{const req=mReq();if(!req.length){toast('No leave requests this month');return}
+    dl(`MarkMe_leave_${mKey()}.csv`,csv([['Employee ID','Name','Type','From','To','Working days','Status','Reason','Yearly quota','Taken (year)','Balance']].concat(req.map(l=>{const s=lvStat(l.id,rm.y);return [l.id,(USERS[l.id]||{name:l.id}).name,l.type,l.from,l.to,nd(l),l.status,l.reason,s.q==null?'':s.q,s.t,s.b==null?'':s.b]}))))}
+}
+document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const a=b.dataset.act,v=b.dataset.v;
   if(a==='tab'){tab=v;render();sync()}
   else if(a==='eye'){const p=$('#pw'),show=p.type==='password';p.type=show?'text':'password';b.innerHTML=ic(show?'eyeoff':'eye',20);b.setAttribute('aria-label',show?'Hide password':'Show password')}
-  else if(a==='in'||a==='out')openCam(a);
+  else if(a==='in'||a==='out')punch(a);
   else if(a==='snap')snap();
   else if(a==='ccancel')closeCam();
   else if(a==='appr'||a==='rej')guard(async()=>{await rt('leaves/'+v,'PATCH',{status:a==='appr'?'Approved':'Rejected'});await sync(true);toast(a==='appr'?'Leave approved':'Leave rejected')});
   else if(a==='cancel')guard(async()=>{await rt('leaves/'+v,'DELETE');await sync(true);toast('Request cancelled')});
   else if(a==='setoffice'){const r=Number($('#rad').value);getLoc().then(l=>guard(async()=>{await rt('office','PUT',{lat:l.lat,lng:l.lng,r});await sync(true);toast('Office location saved')})).catch(()=>toast('Could not get location. Allow location access.'))}
   else if(a==='clroffice')guard(async()=>{await rt('office','DELETE');await sync(true);toast('Office location cleared')});
+  else if(a==='rprev'){rm.m--;if(rm.m<0){rm.m=11;rm.y--}render()}
+  else if(a==='rnext'){const n=new Date();if(rm.y*12+rm.m<n.getFullYear()*12+n.getMonth()){rm.m++;if(rm.m>11){rm.m=0;rm.y++}render()}}
+  else if(a==='xsum'||a==='xdet'||a==='xlv')exportRep(a);
+  else if(a==='saveq'){const q=$('#q-'+v).value;if(q===''||+q<0||+q>366)toast('Enter leave days between 0 and 366');else guard(async()=>{await rt('users/'+v,'PATCH',{quota:Number(q)});await sync(true);toast('Leave quota saved')})}
+  else if(a==='deact'){if(await ask('Deactivate '+USERS[v].name+'?','They will no longer be able to sign in. Their records are kept.','Deactivate','Cancel'))guard(async()=>{await rt('users/'+v,'PATCH',{active:false});await sync(true);toast('Employee deactivated')})}
+  else if(a==='react')guard(async()=>{await rt('users/'+v,'PATCH',{active:true});await sync(true);toast('Employee reactivated')});
   else if(a==='theme'){th=v;store.set('hazri_theme',v);applyTheme();render()}
-  else if(a==='logout'){user=null;store.set('hazri_user','');tab='home';render()}
+  else if(a==='logout'){user=null;store.set(UK,'');tab='home';render()}
 });
 async function doLogin(){
-  const id=$('#id').value.trim().toLowerCase(),pw=$('#pw').value,u=USERS[id],bt=document.querySelector('.lform .btn');
+  const id=$('#id').value.trim().toLowerCase(),pw=$('#pw').value,bt=document.querySelector('.lform .btn');
   if(!DB)return render('Server is not set up. Add the database URL in config.js.');
+  if(!/^[a-z0-9_-]{2,24}$/.test(id))return render('Incorrect ID or password. Check and try again.');
   if(bt){bt.disabled=true;bt.textContent='Signing in…'}
-  let h=null;
-  try{h=u?await rt('pw/'+id):null}catch(e){return render('Cannot reach the server. Check your internet connection.')}
-  const ok=u&&(h?(await sha(id+':'+pw))===h:pw===u.pw);
-  if(!ok)return render('Incorrect ID or password. Check and try again.');
-  user={id,...u};store.set('hazri_user',id);tab=u.role==='admin'?'team':'home';render();sync(true);
+  let r=null,h=null;
+  try{[r,h]=await Promise.all([rt('users/'+id),rt('pw/'+id)])}catch(e){return render('Cannot reach the server. Check your internet connection.')}
+  const b=BASE[id],u=b?{...b,...(r||{}),role:b.role}:(r&&r.name?{...r,role:'emp'}:null);
+  const ok=u&&u.active!==false&&(h?(await sha(id+':'+pw))===h:(b&&pw===b.pw));
+  if(!ok)return render(u&&u.active===false?'This account is deactivated. Contact your administrator.':'Incorrect ID or password. Check and try again.');
+  USERS[id]=u;user={id,name:u.name,role:u.role};store.set(UK,JSON.stringify(user));tab=u.role==='admin'?'team':'home';render();sync(true);
 }
 document.addEventListener('submit',e=>{
   e.preventDefault();
   const f=e.target.dataset.f;
   if(f==='login')doLogin();
   else if(f==='leave'){
-    const from=$('#lf').value,to=$('#lo').value;
-    if(to<from){$('#le').textContent='End date must be on or after the start date.';return}
+    const from=$('#lf').value,to=$('#lo').value,er=$('#le');
+    if(to<from){er.textContent='End date must be on or after the start date.';return}
+    const days=wd(from,to);if(!days){er.textContent='Selected dates fall on a week off (Saturday or Sunday).';return}
+    const s=lvStat(user.id,+from.slice(0,4));
+    if(s.q!=null&&days>s.q-s.t-s.p){er.textContent='Not enough leave balance. Available: '+Math.max(0,s.q-s.t-s.p)+' day(s).';return}
     const ts=Date.now(),o={id:user.id,type:$('#lt').value,from,to,reason:$('#lr').value.trim(),status:'Pending',ts};
     guard(async()=>{await rt('leaves/'+ts,'PUT',o);await sync(true);toast('Leave request sent')});
+  }else if(f==='addemp'){
+    const name=$('#en').value.trim(),id=$('#ei').value.trim().toLowerCase(),pw=$('#ep').value,q=$('#eq').value,er=$('#ee');
+    if(!name){er.textContent='Enter the full name.';return}
+    if(!/^[a-z0-9_-]{3,20}$/.test(id)){er.textContent='User ID must be 3 to 20 letters, numbers, - or _.';return}
+    if(USERS[id]){er.textContent='This User ID already exists.';return}
+    if(pw.length<6){er.textContent='Password must be at least 6 characters.';return}
+    if(q===''||+q<0||+q>366){er.textContent='Enter yearly leave days (0 to 366).';return}
+    guard(async()=>{await rt('pw/'+id,'PUT',await sha(id+':'+pw));await rt('users/'+id,'PUT',{name,role:'emp',quota:Number(q),active:true});await sync(true);toast(name+' added. ID: '+id)});
   }else if(f==='pw'){
     const op=$('#op').value,np=$('#np').value;
     guard(async()=>{
-      const h=await rt('pw/'+user.id),ok=h?(await sha(user.id+':'+op))===h:op===USERS[user.id].pw;
+      const h=await rt('pw/'+user.id),b=BASE[user.id],ok=h?(await sha(user.id+':'+op))===h:(b&&op===b.pw);
       if(!ok){$('#pe').textContent='Current password is incorrect.';return}
       await rt('pw/'+user.id,'PUT',await sha(user.id+':'+np));render();toast('Password updated');
     });

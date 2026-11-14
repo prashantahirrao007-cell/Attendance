@@ -8,7 +8,7 @@
     <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
     <application
         android:label="Mark Me"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:allowBackup="true">
         <activity android:name=".MainActivity" android:exported="true"

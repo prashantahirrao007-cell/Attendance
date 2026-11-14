@@ -1,6 +1,15 @@
 package com.hazri.attendance;
 
 import android.Manifest;
+import android.content.ContentValues;
+import android.content.Context;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.webkit.JavascriptInterface;
+import android.widget.Toast;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
@@ -21,6 +30,42 @@ public class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
     private WebView web;
 
+    public static class Bridge {
+        private final Context ctx;
+        Bridge(Context c) { ctx = c; }
+
+        @JavascriptInterface
+        public void save(String name, String text) {
+            String msg;
+            try {
+                byte[] data = text.getBytes("UTF-8");
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues v = new ContentValues();
+                    v.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                    v.put(MediaStore.Downloads.MIME_TYPE, "text/csv");
+                    v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                    Uri u = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                    OutputStream o = ctx.getContentResolver().openOutputStream(u);
+                    o.write(data);
+                    o.close();
+                    msg = "Saved to Downloads: " + name;
+                } else {
+                    File f = new File(ctx.getExternalFilesDir(null), name);
+                    FileOutputStream o = new FileOutputStream(f);
+                    o.write(data);
+                    o.close();
+                    msg = "Saved: " + f.getAbsolutePath();
+                }
+            } catch (Exception e) {
+                msg = "Could not save the file";
+            }
+            final String m = msg;
+            ((Activity) ctx).runOnUiThread(new Runnable() {
+                public void run() { Toast.makeText(ctx, m, Toast.LENGTH_LONG).show(); }
+            });
+        }
+    }
+
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -40,6 +85,7 @@ public class MainActivity extends Activity {
         s.setDomStorageEnabled(true);
         s.setGeolocationEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        web.addJavascriptInterface(new Bridge(this), "Android");
         web.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
