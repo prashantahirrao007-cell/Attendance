@@ -1,16 +1,8 @@
-HAZRI PRO v2.0 - Android project
+MARK ME v5.0 (attendance app, cloud sync)
 
-LOGIN (ID / Password)
- prashant  / Prashant@123
- jitendra  / Jitendra@123
- tejashree / Tejashree@123
- dipak     / Dipak@123
- admin     / Admin@123   (Administrator)
+Shift 10:00 AM - 6:00 PM, late after 10:15 AM (15 min grace).
+Geofence: admin logs in > Profile > pick radius > "Set to my current location" (while at the office).
+Your Firebase link stays in app/src/main/assets/config.js (this zip does not overwrite it).
 
-APK KASE BANVAYCHI
- 1. GitHub repository madhe ya folder madhil sarva files (.github folder sahit) upload kara.
- 2. Actions > Build APK > Run workflow.
- 3. Build zalyavar Artifacts madhun Hazri-apk download kara, zip extract kara, app-debug.apk install kara.
- Kimva Android Studio madhe folder open karun Build > Build APK(s).
-
-App chi files: app/src/main/assets/index.html
+LOGIN: prashant / Prashant@123, jitendra / Jitendra@123, tejashree / Tejashree@123,
+       dipak / Dipak@123, admin / Admin@123

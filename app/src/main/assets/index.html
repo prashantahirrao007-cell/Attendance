@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#4338CA">
-<title>Hazri – Attendance</title>
+<title>Mark Me</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
 :root{--bg:#F5F6FA;--card:#fff;--ink:#14161F;--mute:#5B6070;--line:#E6E8F0;--pri:#4338CA;--onpri:#fff;--soft:#E3E1FF;--softink:#3730A3;--okbg:#DDF4EF;--ok:#0B6B5E;--latebg:#FFF0D6;--late:#8A4B00;--err:#A32035;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -84,11 +84,24 @@ select{height:50px;border:1px solid var(--line);border-radius:14px;padding:0 14p
 .toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:22px;font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center}
 .toast.show{opacity:1}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
+.cam{position:fixed;inset:0;background:rgba(10,12,20,.86);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.cam[hidden]{display:none}
+.cbox{width:100%;max-width:430px;background:var(--card);border-radius:28px 28px 0 0;padding:20px;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:12px}
+.cbox h2{margin:0;font-size:20px}
+.vwrap{position:relative;height:42vh;aspect-ratio:3/4;align-self:center;border-radius:20px;overflow:hidden;background:#000}
+.vwrap video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.oval{position:absolute;inset:10% 18%;border:3px dashed #fff;border-radius:50%}
+.cst{font-size:14px;color:var(--mute);min-height:40px;text-align:center}
+.btn:disabled{opacity:.5;cursor:default}
+.ph{width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none}
+.fl small{display:block}.fl a{color:var(--pri);font-weight:600}
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="cam" class="cam" hidden role="dialog" aria-modal="true" aria-labelledby="ctitle"><div class="cbox"><h2 id="ctitle">Verify to check in</h2><div class="vwrap"><video id="vid" autoplay playsinline muted></video><div class="oval"></div></div><div id="cst" class="cst" role="status" aria-live="polite"></div><button class="btn" id="cgo" data-act="snap" disabled>Capture photo &amp; confirm</button><button class="btn sec" data-act="ccancel">Cancel</button></div></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="config.js"></script>
 <script>
 const USERS={
   prashant:{name:'Prashant',pw:'Prashant@123',role:'emp'},
@@ -105,7 +118,11 @@ const hm=d=>pad(d.getHours())+':'+pad(d.getMinutes());
 const mins=t=>{const [h,m]=t.split(':').map(Number);return h*60+m};
 const f12=t=>{if(!t)return '—';const [h,m]=t.split(':').map(Number);return pad(h%12||12)+':'+pad(m)+' '+(h<12?'AM':'PM')};
 const dur=(a,b)=>{const d=Math.max(0,mins(b)-mins(a));return Math.floor(d/60)+'h '+pad(d%60)+'m'};
-const isLate=t=>mins(t)>mins('09:45');
+const SHIFT={start:'10:00',end:'18:00',grace:15};
+const lateAfter=()=>{const m=mins(SHIFT.start)+SHIFT.grace;return pad(Math.floor(m/60))+':'+pad(m%60)};
+const isLate=t=>mins(t)>mins(lateAfter());
+const getLoc=()=>new Promise((res,rej)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),rej,{enableHighAccuracy:true,timeout:15000,maximumAge:0}):rej(new Error('no geo')));
+const dist=(a,b)=>{const R=6371000,r=x=>x*Math.PI/180,p=r(b.lat-a.lat),q=r(b.lng-a.lng),h=Math.sin(p/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(q/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 const ini=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fd=k=>new Date(k+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
@@ -124,17 +141,29 @@ const IC={
 };
 const ic=(n,s=22)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 
-function seed(){
-  const L={},P={prashant:['09:15','09:28','09:50','09:20','09:12','09:33'],jitendra:['09:05','09:40','09:22','09:55','09:18','09:25'],tejashree:['09:10','09:12','09:30','09:17','09:44','09:21'],dipak:['09:35','09:48','09:19','09:26','09:58','09:14']},O=['18:35','18:30','18:31','18:40','18:22','18:36'];
-  for(const id in P){L[id]={};const d=new Date();let i=0;
-    while(i<6){d.setDate(d.getDate()-1);if(d.getDay()%6===0)continue;L[id][key(d)]={in:P[id][i],out:O[i]};i++}}
-  return {logs:L,leaves:[]};
+const DB=(window.HAZRI_DB||'').replace(/\/+$/,'');
+const rt=(p,m='GET',b)=>fetch(DB+'/'+p+'.json',{method:m,headers:b!==undefined?{'Content-Type':'application/json'}:{},body:b!==undefined?JSON.stringify(b):undefined,signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
+const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+let db={logs:{},leaves:[],office:null};EMPS.forEach(i=>db.logs[i]={});
+const pc={};let lastSync=0,lastJson='';
+const idle=()=>$('#cam').hidden&&!/^(INPUT|SELECT)$/.test(document.activeElement.tagName);
+async function sync(force){
+  if(!DB)return;
+  try{
+    const [lg,lv,of]=await Promise.all([rt('logs'),rt('leaves'),rt('office')]);
+    const nd={logs:lg||{},leaves:Object.values(lv||{}).sort((a,b)=>a.ts-b.ts),office:of||null};
+    EMPS.forEach(i=>{nd.logs[i]=nd.logs[i]||{}});
+    const s=JSON.stringify(nd);lastSync=Date.now();
+    if(s!==lastJson||force){lastJson=s;db=nd;if(user&&idle())render()}
+  }catch(e){}
 }
-let db;try{db=JSON.parse(store.get('hazri_db2'))}catch(e){}
-if(!db||!db.logs)db=seed();
-const save=()=>store.set('hazri_db2',JSON.stringify(db));
-let pwo={};try{pwo=JSON.parse(store.get('hazri_pw'))||{}}catch(e){}
-const getPw=i=>pwo[i]||USERS[i].pw;
+async function loadPhotos(){
+  if(!user||user.role!=='admin'||tab!=='team')return;
+  const k=key(new Date());let got=false;
+  await Promise.all(EMPS.filter(i=>db.logs[i][k]&&db.logs[i][k].ph&&!pc[i+k]).map(async i=>{try{const p=await rt(`photos/${i}/${k}/in`);if(p){pc[i+k]=p;got=true}}catch(e){}}));
+  if(got&&idle())render();
+}
+const guard=async(f,m)=>{try{await f()}catch(e){toast(m||'No internet. Please try again.')}};
 let th=store.get('hazri_theme')||'auto';
 const applyTheme=()=>{const r=document.documentElement;th==='auto'?r.removeAttribute('data-theme'):r.setAttribute('data-theme',th)};
 applyTheme();
@@ -163,10 +192,11 @@ function cal(id){
     c+=`<span class="${cl}${d===n.getDate()?' td':''}">${d}</span>`}
   return `<div class="card"><b>${n.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</b><div class="cal">${'SMTWTFS'.split('').map(x=>`<em>${x}</em>`).join('')}${c}</div><div class="lg"><span class="pill ok">Present</span><span class="pill lt">Late</span><span class="pill lv">Leave</span></div></div>`;
 }
-const lrow=(l,adm)=>`<div class="row lr"><div class="fl"><b>${adm?USERS[l.id].name+' · ':''}${esc(l.type)}</b><small>${fd(l.from)}${l.to!==l.from?' – '+fd(l.to):''} · ${esc(l.reason)}</small></div><span class="pill ${l.status==='Approved'?'ok':l.status==='Rejected'?'rj':'gray'}">${l.status}</span>${adm&&l.status==='Pending'?`<div class="acts"><button class="mini" data-act="appr" data-v="${l.ts}">Approve</button><button class="mini sec" data-act="rej" data-v="${l.ts}">Reject</button></div>`:''}</div>`;
+const nd=l=>Math.round((new Date(l.to)-new Date(l.from))/864e5)+1;
+const lrow=(l,adm)=>`<div class="row lr"><div class="fl"><b>${adm?USERS[l.id].name+' · ':''}${esc(l.type)}</b><small>${fd(l.from)}${l.to!==l.from?' – '+fd(l.to):''} · ${nd(l)} day${nd(l)>1?'s':''} · ${esc(l.reason)}</small></div><span class="pill ${l.status==='Approved'?'ok':l.status==='Rejected'?'rj':'gray'}">${l.status}</span>${l.status==='Pending'?`<div class="acts">${adm?`<button class="mini" data-act="appr" data-v="${l.ts}">Approve</button><button class="mini sec" data-act="rej" data-v="${l.ts}">Reject</button>`:`<button class="mini sec" data-act="cancel" data-v="${l.ts}">Cancel request</button>`}</div>`:''}</div>`;
 
 function login(err){
-  return `<main class="main login"><div class="brand"><div class="logo">${ic('check',30)}</div><h1>Hazri</h1><p>Smart attendance for your team</p></div>
+  return `<main class="main login"><div class="brand"><div class="logo">${ic('check',30)}</div><h1>Mark Me</h1><p>Smart attendance for your team</p></div>
   <form class="lform" data-f="login" autocomplete="on"><h2>Welcome back</h2><div class="sub">Sign in to mark your attendance</div>
   <label for="id">User ID</label><div class="fld">${ic('user',20)}<input id="id" autocomplete="username" autocapitalize="none" placeholder="Enter your ID" required></div>
   <label for="pw">Password</label><div class="fld">${ic('lock',20)}<input id="pw" type="password" autocomplete="current-password" placeholder="Enter password" required><button type="button" class="eye" data-act="eye" aria-label="Show password">${ic('eye',20)}</button></div>
@@ -180,23 +210,25 @@ function home(){
   const avg=fin.length?(fin.reduce((s,x)=>s+mins(L[x].out)-mins(L[x].in),0)/fin.length/60).toFixed(1)+'h':'—';
   let st,btn;
   if(!e){st='Not checked in yet';btn='<button class="hbtn" data-act="in">Check in</button>'}
-  else if(!e.out){st='Checked in at '+f12(e.in)+(isLate(e.in)?' · Late':'')+'<br>Working: <b id="wk" data-in="'+e.in+'">'+dur(e.in,hm(n))+'</b>';btn='<button class="hbtn" data-act="out">Check out</button>'}
+  else if(!e.out){st='Checked in at '+f12(e.in)+(isLate(e.in)?' · Late by '+(mins(e.in)-mins(SHIFT.start))+' min':'')+'<br>Working: <b id="wk" data-in="'+e.in+'">'+dur(e.in,hm(n))+'</b><br>Photo and location recorded';btn='<button class="hbtn" data-act="out">Check out</button>'}
   else{st='Day complete · '+dur(e.in,e.out);btn='<button class="hbtn" disabled>Done for today</button>'}
   return `<div class="top"><div><div class="sub">${today()}</div><h1>${h<12?'Good morning':h<17?'Good afternoon':'Good evening'}, ${user.name}</h1></div><div class="av">${ini(user.name)}</div></div>
-  <div class="hero"><div class="r"><span>Today’s shift</span><span class="chip">9:30 AM – 6:30 PM</span></div>
+  <div class="hero"><div class="r"><span>Today’s shift</span><span class="chip">${f12(SHIFT.start)} – ${f12(SHIFT.end)}</span></div>
   <div class="clk" id="clk">${f12(hm(n))}</div>
-  <div class="loc">${ic('pin',18)}Main Office</div>
+  <div class="loc">${ic('pin',18)}${db.office?'Geofence on · '+db.office.r+' m':'Geofence not set'} · late after ${f12(lateAfter())}</div>
   <div role="status" style="font-size:15px;font-weight:600;line-height:1.5">${st}</div>${btn}</div>
   <div class="stats">${stat(ks.length,'Present days')}${stat(lt,'Late days')}${stat(avg,'Avg. hours')}</div>
-  <h2>Recent days</h2>${ks.slice(0,3).map(x=>row(x,L[x])).join('')}`;
+  <h2>Recent days</h2>${ks.length?ks.slice(0,3).map(x=>row(x,L[x])).join(''):'<div class="note">No attendance yet. Tap Check in to start.</div>'}`;
 }
 function hist(){
   const L=db.logs[user.id],ks=Object.keys(L).sort().reverse(),n=ks.length,lt=ks.filter(x=>isLate(L[x].in)).length;
-  return `<h1>History</h1>${cal(user.id)}<div class="card"><div class="big">${n}<span> days recorded</span></div><div class="bar"><i style="width:${n?Math.round((n-lt)/n*100):0}%"></i></div><small>${n-lt} on time · ${lt} late</small></div>${ks.map(x=>row(x,L[x])).join('')}`;
+  return `<h1>History</h1>${cal(user.id)}<div class="card"><div class="big">${n}<span> days recorded</span></div><div class="bar"><i style="width:${n?Math.round((n-lt)/n*100):0}%"></i></div><small>${n-lt} on time · ${lt} late</small></div>${ks.length?ks.map(x=>row(x,L[x])).join(''):'<div class="note">No records yet.</div>'}`;
 }
 function leave(){
-  const my=db.leaves.filter(l=>l.id===user.id).reverse(),t=key(new Date());
-  return `<h1>Leave</h1><form class="card" data-f="leave"><label for="lt">Type</label><select id="lt"><option>Casual leave</option><option>Sick leave</option><option>Other</option></select>
+  const mine=db.leaves.filter(l=>l.id===user.id),my=mine.slice().reverse(),t=key(new Date());
+  const taken=mine.filter(l=>l.status==='Approved').reduce((s,l)=>s+nd(l),0),pend=mine.filter(l=>l.status==='Pending').length;
+  return `<h1>Leave</h1><div class="stats">${stat(taken,'Days taken')}${stat(pend,'Pending')}${stat(mine.length,'Requests')}</div>
+  <form class="card" data-f="leave"><label for="lt">Type</label><select id="lt"><option>Casual leave</option><option>Sick leave</option><option>Other</option></select>
   <label for="lf">From</label><input id="lf" type="date" min="${t}" value="${t}" required><label for="lo">To</label><input id="lo" type="date" min="${t}" value="${t}" required>
   <label for="lr">Reason</label><input id="lr" placeholder="Short reason" required><div class="err" role="alert" id="le"></div><button class="btn">Request leave</button></form>
   <h2>My requests</h2>${my.length?my.map(l=>lrow(l)).join(''):'<div class="note">No requests yet. Use the form above to apply.</div>'}`;
@@ -205,20 +237,23 @@ function team(){
   const k=key(new Date()),n=EMPS.filter(i=>db.logs[i][k]).length,pend=db.leaves.filter(l=>l.status==='Pending').length;
   return `<div><div class="sub">${today()}</div><h1>Team today</h1></div>
   <div class="stats">${stat(n,'Checked in')}${stat(EMPS.length-n,'Not yet')}${stat(pend,'Pending')}</div>
-  ${EMPS.map(i=>{const e=db.logs[i][k];return `<div class="row"><div class="av">${ini(USERS[i].name)}</div><div class="fl"><b>${USERS[i].name}</b><small>${e?f12(e.in)+(e.out?' – '+f12(e.out):' · working'):'No check-in yet'}</small></div>${pill(e&&e.in)}</div>`}).join('')}
-  <div class="note">Check-ins made on this device appear here.</div>`;
+  ${db.office?'':'<div class="card"><b>Geofence is off</b><small>Open Profile and tap “Set to my current location” while you are at the office.</small></div>'}
+  ${EMPS.map(i=>{const e=db.logs[i][k],nm=USERS[i].name,av=pc[i+k]?`<img class="ph" src="${pc[i+k]}" alt="${nm} check-in photo">`:`<div class="av">${ini(nm)}</div>`;
+  return `<div class="row">${av}<div class="fl"><b>${nm}</b><small>${e?f12(e.in)+(e.out?' – '+f12(e.out):' · working'):'No check-in yet'}</small>${e&&e.loc?`<small><a href="https://maps.google.com/?q=${e.loc.lat},${e.loc.lng}" target="_blank" rel="noopener">View location</a>${db.office?' · '+Math.round(dist(e.loc,db.office))+' m from office':''}</small>`:''}</div>${pill(e&&e.in)}</div>`}).join('')}
+  <div class="note">${lastSync?'Live · synced '+f12(hm(new Date(lastSync))):'Connecting to server…'}</div>`;
 }
 function leavesA(){
   const a=db.leaves.slice().reverse();
   return `<h1>Leave requests</h1>${a.length?a.map(l=>lrow(l,1)).join(''):'<div class="note">No leave requests yet. New requests from employees appear here.</div>'}`;
 }
 function me(){
-  const adm=user.role==='admin';
+  const adm=user.role==='admin',o=db.office;
   return `<h1>Profile</h1><div class="card pf"><div class="av lg">${ini(user.name)}</div><b>${user.name}</b><small>${user.id} · ${adm?'Administrator':'Employee'}</small></div>
+  ${adm?`<div class="card"><b>Office location</b><small>${o?o.lat.toFixed(5)+', '+o.lng.toFixed(5)+' · allowed radius '+o.r+' m':'Not set. Check-ins are location-tagged but not restricted.'}</small><label for="rad">Allowed radius</label><select id="rad">${[100,200,300,500].map(r=>`<option value="${r}"${(o?o.r:200)===r?' selected':''}>${r} m</option>`).join('')}</select><button class="btn" data-act="setoffice">Set to my current location</button>${o?'<button class="btn sec" data-act="clroffice">Clear office location</button>':''}</div>`:''}
   <div class="card"><b>Appearance</b><div class="seg">${['auto','light','dark'].map(t=>`<button data-act="theme" data-v="${t}" class="${th===t?'on':''}">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div></div>
   <form class="card" data-f="pw"><b>Change password</b><label for="op">Current password</label><input id="op" type="password" autocomplete="current-password" required>
   <label for="np">New password (min. 6 characters)</label><input id="np" type="password" autocomplete="new-password" minlength="6" required><div class="err" role="alert" id="pe"></div><button class="btn">Update password</button></form>
-  ${adm?'<button class="btn sec" data-act="reset">Reset demo data</button>':''}<button class="btn" data-act="logout">Sign out</button>`;
+  <button class="btn" data-act="logout">Sign out</button>`;
 }
 function render(err){
   const A=$('#app');
@@ -227,42 +262,83 @@ function render(err){
   if(!tabs.some(t=>t[0]===tab))tab=tabs[0][0];
   const body={home,hist,team,lv:leavesA,leave,me}[tab]();
   A.innerHTML=`<main class="main">${body}</main><nav aria-label="Main">${tabs.map(([k,l,i])=>`<button data-act="tab" data-v="${k}" class="${tab===k?'on':''}"><span>${ic(i)}</span>${l}</button>`).join('')}</nav>`;
+  if(tab==='team')loadPhotos();
 }
 
+let cs=null;
+function closeCam(){if(cs&&cs.stream)cs.stream.getTracks().forEach(t=>t.stop());cs=null;$('#cam').hidden=true;$('#vid').srcObject=null}
+function openCam(mode){
+  const st=$('#cst'),go=$('#cgo'),my=cs={mode,stream:null,loc:null,errs:[]};
+  $('#cam').hidden=false;go.disabled=true;
+  $('#ctitle').textContent=mode==='in'?'Verify to check in':'Verify to check out';
+  st.textContent='Starting camera and location…';
+  const ready=()=>{if(cs===my&&my.stream&&my.loc){go.disabled=false;st.textContent='Ready · GPS accuracy ±'+Math.round(my.loc.acc)+' m. Keep your face inside the oval.'}};
+  const fail=m=>{if(cs!==my)return;my.errs.push(m);st.textContent=my.errs.join(' ')};
+  (navigator.mediaDevices?navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false}):Promise.reject()).then(s=>{if(cs!==my){s.getTracks().forEach(t=>t.stop());return}my.stream=s;$('#vid').srcObject=s;ready()}).catch(()=>fail('Camera access is required. Allow camera permission and try again.'));
+  getLoc().then(l=>{if(cs===my){my.loc=l;ready()}}).catch(()=>fail('Location is required. Turn on GPS and allow location permission.'));
+}
+async function snap(){
+  if(!cs||!cs.stream||!cs.loc)return;
+  const v=$('#vid'),go=$('#cgo'),st=$('#cst'),c=document.createElement('canvas'),w=240,h=Math.round(w*(v.videoHeight||4)/(v.videoWidth||3));
+  c.width=w;c.height=h;c.getContext('2d').drawImage(v,0,0,w,h);
+  const photo=c.toDataURL('image/jpeg',0.55),loc=cs.loc,mode=cs.mode,off=db.office;
+  if(off){const d=dist(loc,off);if(d>off.r){st.textContent='You are about '+Math.round(d)+' m from the office (allowed '+off.r+' m). Cancel, move closer and try again.';return}}
+  go.disabled=true;st.textContent='Saving…';
+  const id=user.id,k=key(new Date()),t=hm(new Date());
+  try{
+    const cur=await rt(`logs/${id}/${k}`);
+    if(mode==='in'&&cur){st.textContent='You are already checked in today (maybe from another device). Cancel to close.';return}
+    if(mode==='out'&&(!cur||cur.out)){st.textContent=cur?'You have already checked out today. Cancel to close.':'No check-in found for today. Cancel to close.';return}
+    if(mode==='in'){await rt(`logs/${id}/${k}`,'PUT',{in:t,loc,ph:1});await rt(`photos/${id}/${k}/in`,'PUT',photo)}
+    else{await rt(`logs/${id}/${k}`,'PATCH',{out:t,locOut:loc,pho:1});await rt(`photos/${id}/${k}/out`,'PUT',photo)}
+    closeCam();await sync(true);toast((mode==='in'?'Checked in at ':'Checked out at ')+f12(t));
+  }catch(e){go.disabled=false;st.textContent='Could not save. Check your internet and try again.'}
+}
 document.addEventListener('click',e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const a=b.dataset.act,v=b.dataset.v;
-  if(a==='tab'){tab=v;render()}
+  if(a==='tab'){tab=v;render();sync()}
   else if(a==='eye'){const p=$('#pw'),show=p.type==='password';p.type=show?'text':'password';b.innerHTML=ic(show?'eyeoff':'eye',20);b.setAttribute('aria-label',show?'Hide password':'Show password')}
-  else if(a==='in'||a==='out'){
-    const L=db.logs[user.id],k=key(new Date()),t=hm(new Date());
-    if(a==='in'){L[k]={in:t};toast('Checked in at '+f12(t))}else if(L[k]){L[k].out=t;toast('Checked out at '+f12(t))}
-    save();render();
-  }
-  else if(a==='appr'||a==='rej'){const l=db.leaves.find(x=>String(x.ts)===v);if(l){l.status=a==='appr'?'Approved':'Rejected';save();render();toast('Leave '+l.status.toLowerCase())}}
+  else if(a==='in'||a==='out')openCam(a);
+  else if(a==='snap')snap();
+  else if(a==='ccancel')closeCam();
+  else if(a==='appr'||a==='rej')guard(async()=>{await rt('leaves/'+v,'PATCH',{status:a==='appr'?'Approved':'Rejected'});await sync(true);toast(a==='appr'?'Leave approved':'Leave rejected')});
+  else if(a==='cancel')guard(async()=>{await rt('leaves/'+v,'DELETE');await sync(true);toast('Request cancelled')});
+  else if(a==='setoffice'){const r=Number($('#rad').value);getLoc().then(l=>guard(async()=>{await rt('office','PUT',{lat:l.lat,lng:l.lng,r});await sync(true);toast('Office location saved')})).catch(()=>toast('Could not get location. Allow location access.'))}
+  else if(a==='clroffice')guard(async()=>{await rt('office','DELETE');await sync(true);toast('Office location cleared')});
   else if(a==='theme'){th=v;store.set('hazri_theme',v);applyTheme();render()}
-  else if(a==='reset'){db=seed();save();render();toast('Demo data reset')}
   else if(a==='logout'){user=null;store.set('hazri_user','');tab='home';render()}
 });
+async function doLogin(){
+  const id=$('#id').value.trim().toLowerCase(),pw=$('#pw').value,u=USERS[id],bt=document.querySelector('.lform .btn');
+  if(!DB)return render('Server is not set up. Add the database URL in config.js.');
+  if(bt){bt.disabled=true;bt.textContent='Signing in…'}
+  let h=null;
+  try{h=u?await rt('pw/'+id):null}catch(e){return render('Cannot reach the server. Check your internet connection.')}
+  const ok=u&&(h?(await sha(id+':'+pw))===h:pw===u.pw);
+  if(!ok)return render('Incorrect ID or password. Check and try again.');
+  user={id,...u};store.set('hazri_user',id);tab=u.role==='admin'?'team':'home';render();sync(true);
+}
 document.addEventListener('submit',e=>{
   e.preventDefault();
   const f=e.target.dataset.f;
-  if(f==='login'){
-    const id=$('#id').value.trim().toLowerCase(),pw=$('#pw').value;
-    if(USERS[id]&&getPw(id)===pw){user={id,...USERS[id]};store.set('hazri_user',id);tab=USERS[id].role==='admin'?'team':'home';render()}
-    else render('Incorrect ID or password. Check and try again.');
-  }else if(f==='leave'){
+  if(f==='login')doLogin();
+  else if(f==='leave'){
     const from=$('#lf').value,to=$('#lo').value;
     if(to<from){$('#le').textContent='End date must be on or after the start date.';return}
-    db.leaves.push({id:user.id,type:$('#lt').value,from,to,reason:$('#lr').value.trim(),status:'Pending',ts:Date.now()});
-    save();render();toast('Leave request sent');
+    const ts=Date.now(),o={id:user.id,type:$('#lt').value,from,to,reason:$('#lr').value.trim(),status:'Pending',ts};
+    guard(async()=>{await rt('leaves/'+ts,'PUT',o);await sync(true);toast('Leave request sent')});
   }else if(f==='pw'){
-    if($('#op').value!==getPw(user.id)){$('#pe').textContent='Current password is incorrect.';return}
-    pwo[user.id]=$('#np').value;store.set('hazri_pw',JSON.stringify(pwo));render();toast('Password updated');
+    const op=$('#op').value,np=$('#np').value;
+    guard(async()=>{
+      const h=await rt('pw/'+user.id),ok=h?(await sha(user.id+':'+op))===h:op===USERS[user.id].pw;
+      if(!ok){$('#pe').textContent='Current password is incorrect.';return}
+      await rt('pw/'+user.id,'PUT',await sha(user.id+':'+np));render();toast('Password updated');
+    });
   }
 });
 setInterval(()=>{const n=new Date(),c=$('#clk'),w=$('#wk');if(c)c.textContent=f12(hm(n));if(w)w.textContent=dur(w.dataset.in,hm(n))},1000);
-render();
+render();sync(true);setInterval(sync,15000);
 
 </script>
 </body>
